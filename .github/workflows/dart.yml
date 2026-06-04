@@ -2,8 +2,8 @@ name: Compilar APK de Flutter
 
 on:
   push:
-    branches: [ main, master ] # Se ejecutará cada vez que subas código
-  workflow_dispatch: # Permite compilar manualmente pulsando un botón
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,18 +23,25 @@ jobs:
       with:
         channel: 'stable'
 
-    - name: Instalar dependencias
-      working-directory: AndroidToWeb-main # Se mueve directo a la carpeta del proyecto
+    - name: Descubrir Ruta y Compilar APK
       run: |
+        # 1. Buscar de forma automática en qué carpeta está el proyecto de Flutter
+        RUTA_PROYECTO=$(dirname $(find . -name "pubspec.yaml" | head -n 1))
+        echo "🚀 Proyecto detectado en la ruta: $RUTA_PROYECTO"
+        
+        # 2. Entrar a esa carpeta e instalar dependencias
+        cd $RUTA_PROYECTO
         flutter pub get
         flutter pub add flutter_webrtc web_socket_channel
-
-    - name: Construir APK
-      working-directory: AndroidToWeb-main # Se mueve directo a la carpeta del proyecto
-      run: flutter build apk --release
+        
+        # 3. Compilar la APK en modo release
+        flutter build apk --release
+        
+        # 4. Guardar la ruta de la APK generada para el siguiente paso
+        echo "RUTA_APK=$RUTA_PROYECTO/build/app/outputs/flutter-apk/app-release.apk" >> $GITHUB_ENV
 
     - name: Subir APK terminada
       uses: actions/upload-artifact@v4
       with:
         name: app-release
-        path: AndroidToWeb-main/build/app/outputs/flutter-apk/app-release.apk
+        path: ${{ env.RUTA_APK }}
