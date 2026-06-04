@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # v4 ya es compatible con entornos Node moderno
     - uses: actions/checkout@v4
 
     - name: Configurar Java
@@ -18,6 +19,7 @@ jobs:
         distribution: 'zulu'
         java-version: '17'
 
+    # Actualizado a v2.14+ que da soporte nativo a los últimos runners
     - name: Configurar Flutter
       uses: subosito/flutter-action@v2
       with:
@@ -25,19 +27,72 @@ jobs:
 
     - name: Descubrir Ruta y Compilar APK
       run: |
-        # 1. Buscar de forma automática en qué carpeta está el proyecto de Flutter
+        # 1. Forzar compatibilidad si el entorno protesta por Node antiguo en algún subproceso
+        export FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true
+        
+        # 2. Localizar dinámicamente el proyecto de Flutter
         RUTA_PROYECTO=$(dirname $(find . -name "pubspec.yaml" | head -n 1))
         echo "🚀 Proyecto detectado en la ruta: $RUTA_PROYECTO"
         
-        # 2. Entrar a esa carpeta e instalar dependencias
+        # 3. Moverse e instalar dependencias limpiamente
         cd $RUTA_PROYECTO
         flutter pub get
         flutter pub add flutter_webrtc web_socket_channel
         
-        # 3. Compilar la APK en modo release
+        # 4. Construir la APK release
         flutter build apk --release
         
-        # 4. Guardar la ruta de la APK generada para el siguiente paso
+        # 5. Exportar la ubicación exacta del archivo generado
+        echo "RUTA_APK=$RUTA_PROYECTO/build/app/outputs/flutter-apk/app-release.apk" >> $GITHUB_ENV
+
+    - name: Subir APK terminada
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-release
+        path: ${{ env.RUTA_APK }}name: Compilar APK de Flutter
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # v4 ya es compatible con entornos Node moderno
+    - uses: actions/checkout@v4
+
+    - name: Configurar Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+
+    # Actualizado a v2.14+ que da soporte nativo a los últimos runners
+    - name: Configurar Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+
+    - name: Descubrir Ruta y Compilar APK
+      run: |
+        export FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true
+        
+        # 2. Localizar dinámicamente el proyecto de Flutter
+        RUTA_PROYECTO=$(dirname $(find . -name "pubspec.yaml" | head -n 1))
+        echo "🚀 Proyecto detectado en la ruta: $RUTA_PROYECTO"
+        
+        # 3. Moverse e instalar dependencias limpiamente
+        cd $RUTA_PROYECTO
+        flutter pub get
+        flutter pub add flutter_webrtc web_socket_channel
+        
+        # 4. Construir la APK release
+        flutter build apk --release
+        
+        # 5. Exportar la ubicación exacta del archivo generado
         echo "RUTA_APK=$RUTA_PROYECTO/build/app/outputs/flutter-apk/app-release.apk" >> $GITHUB_ENV
 
     - name: Subir APK terminada
