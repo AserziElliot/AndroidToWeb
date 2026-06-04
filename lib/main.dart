@@ -64,7 +64,7 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
     try {
       // 1. Conexión al servidor de señalización de tu web estática
       // REEMPLAZA ESTA URL CON TU SERVIDOR DE WEBSOCKETS (ej: de Render, Heroku o tu IP local)
-      final serverUrl = 'wss://tu-servidor-signaling.onrender.com'; 
+      final serverUrl = 'wss://androidtowebbutrenderrn.onrender.com'; 
       _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
 
       // 2. Crear la conexión WebRTC Peer antes de capturar pantalla
