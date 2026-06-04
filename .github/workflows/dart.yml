@@ -28,20 +28,16 @@ jobs:
         channel: 'stable'
 
     - name: Instalar dependencias y Compilar APK
-      run: |
-        # 1. Encontrar de manera dinámica la carpeta donde está el proyecto
+      run: |        # 1. Encontrar de manera dinámica la carpeta donde está el proyecto
         DIR_PROYECTO=$(dirname $(find . -name "pubspec.yaml" | head -n 1))
         echo "Carpeta encontrada: $DIR_PROYECTO"
         
-        # 2. Entrar a la carpeta del proyecto e instalar librerías
         cd "$DIR_PROYECTO"
         flutter pub get
         flutter pub add flutter_webrtc web_socket_channel
         
-        # 3. Compilar el archivo ejecutable APK
         flutter build apk --release
         
-        # 4. Copiar la APK a la raíz del entorno con un nombre fijo y limpio
         cd "$GITHUB_WORKSPACE"
         cp "$DIR_PROYECTO/build/app/outputs/flutter-apk/app-release.apk" ./app-release.apk
 
