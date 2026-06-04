@@ -24,15 +24,17 @@ jobs:
         channel: 'stable'
 
     - name: Instalar dependencias
+      working-directory: ./AndroidToWeb-main  # <-- LE RECUERDA A GITHUB DÓNDE BUSCAR
       run: |
         flutter pub get
         flutter pub add flutter_webrtc web_socket_channel
 
     - name: Construir APK
+      working-directory: ./AndroidToWeb-main  # <-- LE RECUERDA A GITHUB DÓNDE COMPILAR
       run: flutter build apk --release
 
     - name: Subir APK terminada
       uses: actions/upload-artifact@v4
       with:
         name: app-release
-        path: build/app/outputs/flutter-apk/app-release.apk
+        path: AndroidToWeb-main/build/app/outputs/flutter-apk/app-release.apk # <-- RUTA DE SALIDA CORREGIDA
