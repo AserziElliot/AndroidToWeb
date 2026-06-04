@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:permission_handler/permission_handler.dart'; // <-- Nueva librería de control
 import 'dart:convert';
 
 void main() {
@@ -37,18 +38,30 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
   RTCPeerConnection? _peerConnection;
   WebSocketChannel? _channel;
   
-  // Estados de la conexión: 'idle' (libre), 'connecting' (conectando), 'casting' (transmitiendo)
   String _status = 'idle'; 
   final TextEditingController _codeController = TextEditingController();
 
-  // Servidores STUN públicos de Google para establecer la conexión P2P
   final Map<String, dynamic> _rtcConfig = {
     'iceServers': [
       {'urls': 'stun:stun.l.google.com:19302'},
-      {'urls': 'stun:stun1.l.google.com:19302'},
     ]
   };
-Future<void> _startScreenCast() async {
+
+  @override
+  void initState() {
+    super.initState();
+    _requestInitialPermissions(); // Pedir permisos amigablemente al abrir la app
+  }
+
+  // Función para asegurar que el móvil tiene los permisos base antes de emitir
+  Future<void> _requestInitialPermissions() async {
+    await [
+      Permission.camera,
+      Permission.microphone,
+    ].request();
+  }
+
+  Future<void> _startScreenCast() async {
     if (_codeController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Por favor, introduce el código de la sala web')),
@@ -61,33 +74,34 @@ Future<void> _startScreenCast() async {
     });
 
     try {
-// 1. SOLICITAR PERMISO PRIMERO: Capturar la pantalla en automático
+      // 1. SOLICITAR PERMISOS DE CAPTURA NATIVOS
+      // Esto fuerza a Android a entender que somos una app legal pidiendo compartir pantalla
       final Map<String, dynamic> mediaConstraints = {
-        'audio': false, 
-        'video': true // Al dejarlo en true, usa la resolución exacta de tu pantalla sin forzarla
+        'audio': false,
+        'video': true
       };
 
+      // Lanzar la captura nativa de pantalla
       _localStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
 
-      // Si el usuario cancela el diálogo de Android, salimos de forma segura
       if (_localStream == null) {
         _stopScreenCast();
         return;
       }
 
-      // 2. CONECTAR AL SERVIDOR: Una vez tenemos el vídeo capturado de forma segura
+      // 2. CONECTAR AL SERVIDOR DE RENDER
       final serverUrl = 'wss://androidtowebbutrenderrn.onrender.com'; 
       _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
 
-      // 3. CONFIGURAR WEBRTC PEER
+      // 3. CONFIGURAR WEBRTC PEER CONNECTION
       _peerConnection = await createPeerConnection(_rtcConfig);
 
-      // Inyectar las pistas de vídeo de la pantalla dentro de WebRTC
+      // Añadir la pista de video de la pantalla a WebRTC
       _localStream!.getTracks().forEach((track) {
         _peerConnection!.addTrack(track, _localStream!);
       });
 
-      // Escuchar las respuestas de la web
+      // Escuchar las respuestas de tu servidor en Render
       _channel!.stream.listen((message) async {
         var data = jsonDecode(message);
         
@@ -110,7 +124,7 @@ Future<void> _startScreenCast() async {
         _stopScreenCast();
       });
 
-      // Intercambiar candidatos ICE con la web
+      // Enviar nuestros candidatos ICE hacia la web
       _peerConnection!.onIceCandidate = (candidate) {
         _channel!.sink.add(jsonEncode({
           'type': 'candidate',
@@ -121,7 +135,7 @@ Future<void> _startScreenCast() async {
         }));
       };
 
-      // 4. CREAR Y ENVIAR LA OFERTA
+      // 4. CREAR LA OFERTA DE VIDEO
       RTCSessionDescription offer = await _peerConnection!.createOffer();
       await _peerConnection!.setLocalDescription(offer);
 
@@ -145,6 +159,9 @@ Future<void> _startScreenCast() async {
     
     setState(() {
       _status = 'idle';
+      _localStream = null;
+      _peerConnection = null;
+      _channel = null;
     });
   }
 
@@ -171,47 +188,43 @@ Future<void> _startScreenCast() async {
         backgroundColor: Colors.transparent,
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 30.0),
+        padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Icono de estado dinámico
+            // Estado visual
             Icon(
-              _status == 'casting' ? Icons.portable_wifi_off_rounded : Icons.screen_share_rounded,
-              size: 100,
-              color: _status == 'casting' ? Colors.greenAccent : (_status == 'connecting' ? Colors.orangeAccent : Colors.blueAccent),
+              _status == 'casting' ? Icons.portable_wifi_off : Icons.screen_share,
+              size: 80,
+              color: _status == 'casting' ? Colors.greenAccent : Colors.blueAccent,
             ),
-            const SizedBox(height: 30),
-            
-            // Texto indicador de estado
+            const SizedBox(height: 20),
             Text(
-              _status == 'casting' 
-                  ? 'TRANSMITIENDO PANTALLA...' 
-                  : (_status == 'connecting' ? 'CONECTANDO CON LA WEB...' : 'LISTO PARA EMITIR'),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 18, 
-                fontWeight: FontWeight.bold,
-                color: _status == 'casting' ? Colors.greenAccent : Colors.white70
-              ),
+              _status == 'idle' 
+                  ? 'Listo para transmitir' 
+                  : (_status == 'connecting' ? 'Conectando con la Web...' : '¡Transmitiendo Pantalla!'),
+              textAlign: center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 40),
 
-            // Input del código de sala
+            // Cuadro de texto para introducir la sala
             TextField(
               controller: _codeController,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 22, letterSpacing: 2),
+              keyboardType: TextInputType.number,
+              textAlign: center,
+              style: const TextStyle(fontSize: 22, letterSpacing: 4, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
-                hintText: 'CÓDIGO WEB',
-                hintStyle: const TextStyle(fontSize: 16, color: Colors.white30),
-                filled: true,
-                fillColor: const Color(0xFF1E1E1E),
+                labelText: 'Código de la Sala Web',
+                labelStyle: const TextStyle(fontSize: 14, letterSpacing: 0),
+                hintText: '0000',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(15),
                   borderSide: BorderSide.none,
                 ),
+                filled: true,
+                fillColor: const Color(0xFF1E1E1E),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(15),
                   borderSide: const BorderSide(color: Colors.blueAccent, width: 2),
