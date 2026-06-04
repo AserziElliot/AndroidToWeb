@@ -61,17 +61,10 @@ Future<void> _startScreenCast() async {
     });
 
     try {
-      // 1. SOLICITAR PERMISO PRIMERO: Capturar la pantalla completa de Android
+// 1. SOLICITAR PERMISO PRIMERO: Capturar la pantalla en automático
       final Map<String, dynamic> mediaConstraints = {
-        'audio': false, // Ponemos false temporalmente para evitar crasheos por permisos de micrófono
-        'video': {
-          'mandatory': {
-            'minWidth': '1280', 
-            'minHeight': '720',
-            'minFrameRate': '30',
-          },
-          'optional': [],
-        }
+        'audio': false, 
+        'video': true // Al dejarlo en true, usa la resolución exacta de tu pantalla sin forzarla
       };
 
       _localStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
