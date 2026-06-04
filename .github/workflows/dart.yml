@@ -24,18 +24,18 @@ jobs:
       with:
         channel: 'stable'
 
-    - name: Instalar dependencias
-      working-directory: AndroidToWeb-main
+    - name: Reconstruir Proyecto y Compilar
       run: |
-        flutter pub get
+        flutter create --org com.ejemplo mi_app_temporal
+        cp lib/main.dart mi_app_temporal/lib/main.dart
+        cd mi_app_temporal
         flutter pub add flutter_webrtc web_socket_channel
-
-    - name: Construir APK
-      working-directory: AndroidToWeb-main
-      run: flutter build apk --release
+        flutter pub get
+        flutter build apk --release
+        cp build/app/outputs/flutter-apk/app-release.apk ../app-release.apk
 
     - name: Subir APK terminada
       uses: actions/upload-artifact@v4
       with:
         name: app-release
-        path: AndroidToWeb-main/build/app/outputs/flutter-apk/app-release.apk
+        path: app-release.apk
