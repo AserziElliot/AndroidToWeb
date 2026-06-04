@@ -10,12 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Fuerza el uso del entorno moderno compatible con Node 24
     - name: Descargar codigo
       uses: actions/checkout@v4
-      with:
-        sparse-checkout: |
-          .
 
     - name: Configurar Java
       uses: actions/setup-java@v4
@@ -28,40 +24,18 @@ jobs:
       with:
         channel: 'stable'
 
-    - name: Instalar dependencias y Compilar APK
+    - name: Instalar dependencias
+      working-directory: AndroidToWeb-main
       run: |
-        echo "=== VERIFICANDO ARCHIVOS EN EL SERVIDOR ==="
-        ls -R
-        
-        # 1. Definir la carpeta de forma manual según tu estructura original
-        DIR_PROYECTO="AndroidToWeb-main"
-        
-        # 2. Comprobar si la carpeta existe, si no, buscarla en la raíz
-        if [ ! -d "$DIR_PROYECTO" ]; then
-          echo "⚠️ La carpeta $DIR_PROYECTO no se encontró en la raíz."
-          # Intentar usar la raíz directamente si los archivos se subieron sueltos
-          if [ -f "pubspec.yaml" ]; then
-            DIR_PROYECTO="."
-            echo "🗂️ Archivo pubspec.yaml detectado directamente en la raíz."
-          else
-            echo "❌ ERROR CRÍTICO: No se encuentra pubspec.yaml por ningún lado."
-            exit 1
-          fi
-        fi
-        
-        # 3. Entrar a la carpeta correcta e instalar librerías
-        cd "$DIR_PROYECTO"
         flutter pub get
         flutter pub add flutter_webrtc web_socket_channel
-        
-        # 4. Compilar la APK
-        flutter build apk --release
-        
-        # 5. Copiar la APK generada a la raíz para guardarla
-        cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/app-release.apk"
+
+    - name: Construir APK
+      working-directory: AndroidToWeb-main
+      run: flutter build apk --release
 
     - name: Subir APK terminada
       uses: actions/upload-artifact@v4
       with:
         name: app-release
-        path: app-release.apk
+        path: AndroidToWeb-main/build/app/outputs/flutter-apk/app-release.apk
