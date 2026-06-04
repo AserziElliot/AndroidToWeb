@@ -26,7 +26,9 @@ jobs:
 
     - name: Reconstruir Proyecto y Compilar
       run: |
-        flutter create --org com.TuElliotFav mi_app_temporal
+        flutter create --org com.TuElliotFav --project-name stream_app mi_app_temporal
+        PERMISO_INTERNET='<uses-permission android:name="android.permission.INTERNET"/>'
+        sed -i "/<manifest/a \    $PERMISO_INTERNET" mi_app_temporal/android/app/src/main/AndroidManifest.xml
         cp lib/main.dart mi_app_temporal/lib/main.dart
         cd mi_app_temporal
         flutter pub add flutter_webrtc web_socket_channel
