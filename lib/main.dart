@@ -48,8 +48,7 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
       {'urls': 'stun:stun1.l.google.com:19302'},
     ]
   };
-
-  Future<void> _startScreenCast() async {
+Future<void> _startScreenCast() async {
     if (_codeController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Por favor, introduce el código de la sala web')),
@@ -62,15 +61,40 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
     });
 
     try {
-      // 1. Conexión al servidor de señalización de tu web estática
-      // REEMPLAZA ESTA URL CON TU SERVIDOR DE WEBSOCKETS (ej: de Render, Heroku o tu IP local)
+      // 1. SOLICITAR PERMISO PRIMERO: Capturar la pantalla completa de Android
+      final Map<String, dynamic> mediaConstraints = {
+        'audio': false, // Ponemos false temporalmente para evitar crasheos por permisos de micrófono
+        'video': {
+          'mandatory': {
+            'minWidth': '1280', 
+            'minHeight': '720',
+            'minFrameRate': '30',
+          },
+          'optional': [],
+        }
+      };
+
+      _localStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
+
+      // Si el usuario cancela el diálogo de Android, salimos de forma segura
+      if (_localStream == null) {
+        _stopScreenCast();
+        return;
+      }
+
+      // 2. CONECTAR AL SERVIDOR: Una vez tenemos el vídeo capturado de forma segura
       final serverUrl = 'wss://androidtowebbutrenderrn.onrender.com'; 
       _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
 
-      // 2. Crear la conexión WebRTC Peer antes de capturar pantalla
+      // 3. CONFIGURAR WEBRTC PEER
       _peerConnection = await createPeerConnection(_rtcConfig);
 
-      // Escuchar las respuestas (SDP Answer y Candidatos ICE) desde la web receptora
+      // Inyectar las pistas de vídeo de la pantalla dentro de WebRTC
+      _localStream!.getTracks().forEach((track) {
+        _peerConnection!.addTrack(track, _localStream!);
+      });
+
+      // Escuchar las respuestas de la web
       _channel!.stream.listen((message) async {
         var data = jsonDecode(message);
         
@@ -93,27 +117,7 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
         _stopScreenCast();
       });
 
-      // 3. Solicitar permiso nativo de Android para capturar pantalla completa
-      final Map<String, dynamic> mediaConstraints = {
-        'audio': true, // Captura también el audio interno del dispositivo si Android lo permite
-        'video': {
-          'mandatory': {
-            'minWidth': '1280', // Resolución HD para que se vea nítido en la web
-            'minHeight': '720',
-            'minFrameRate': '30',
-          },
-          'optional': [],
-        }
-      };
-
-      _localStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
-
-      // 4. Inyectar el vídeo de la pantalla dentro de la conexión WebRTC
-      _localStream!.getTracks().forEach((track) {
-        _peerConnection!.addTrack(track, _localStream!);
-      });
-
-      // Intercambiar datos de red (ICE Candidates) con la web
+      // Intercambiar candidatos ICE con la web
       _peerConnection!.onIceCandidate = (candidate) {
         _channel!.sink.add(jsonEncode({
           'type': 'candidate',
@@ -124,7 +128,7 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
         }));
       };
 
-      // 5. Crear la oferta de transmisión (SDP Offer) y enviarla a la web
+      // 4. CREAR Y ENVIAR LA OFERTA
       RTCSessionDescription offer = await _peerConnection!.createOffer();
       await _peerConnection!.setLocalDescription(offer);
 
