@@ -10,38 +10,56 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # v4.2.0+ ya corre de forma nativa sobre Node.js 24 sin lanzar warnings
+    # Fuerza el uso del entorno moderno compatible con Node 24
     - name: Descargar codigo
       uses: actions/checkout@v4
+      with:
+        sparse-checkout: |
+          .
 
-    # v4.3.0+ está totalmente adaptado a los nuevos entornos de ejecución distribuidos
     - name: Configurar Java
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
 
-    # v2.17.0+ incluye soporte completo para Node 24 y las últimas versiones estables de Flutter
     - name: Configurar Flutter
       uses: subosito/flutter-action@v2
       with:
         channel: 'stable'
 
     - name: Instalar dependencias y Compilar APK
-      run: |        # 1. Encontrar de manera dinámica la carpeta donde está el proyecto
-        DIR_PROYECTO=$(dirname $(find . -name "pubspec.yaml" | head -n 1))
-        echo "Carpeta encontrada: $DIR_PROYECTO"
+      run: |
+        echo "=== VERIFICANDO ARCHIVOS EN EL SERVIDOR ==="
+        ls -R
         
+        # 1. Definir la carpeta de forma manual según tu estructura original
+        DIR_PROYECTO="AndroidToWeb-main"
+        
+        # 2. Comprobar si la carpeta existe, si no, buscarla en la raíz
+        if [ ! -d "$DIR_PROYECTO" ]; then
+          echo "⚠️ La carpeta $DIR_PROYECTO no se encontró en la raíz."
+          # Intentar usar la raíz directamente si los archivos se subieron sueltos
+          if [ -f "pubspec.yaml" ]; then
+            DIR_PROYECTO="."
+            echo "🗂️ Archivo pubspec.yaml detectado directamente en la raíz."
+          else
+            echo "❌ ERROR CRÍTICO: No se encuentra pubspec.yaml por ningún lado."
+            exit 1
+          fi
+        fi
+        
+        # 3. Entrar a la carpeta correcta e instalar librerías
         cd "$DIR_PROYECTO"
         flutter pub get
         flutter pub add flutter_webrtc web_socket_channel
         
+        # 4. Compilar la APK
         flutter build apk --release
         
-        cd "$GITHUB_WORKSPACE"
-        cp "$DIR_PROYECTO/build/app/outputs/flutter-apk/app-release.apk" ./app-release.apk
+        # 5. Copiar la APK generada a la raíz para guardarla
+        cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/app-release.apk"
 
-    # v4.6.0+ es la acción oficial moderna diseñada específicamente para Node 24
     - name: Subir APK terminada
       uses: actions/upload-artifact@v4
       with:
