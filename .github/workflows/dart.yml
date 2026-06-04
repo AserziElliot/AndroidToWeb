@@ -10,40 +10,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    # v4.2.0+ ya corre de forma nativa sobre Node.js 24 sin lanzar warnings
+    - name: Descargar codigo
+      uses: actions/checkout@v4
 
+    # v4.3.0+ está totalmente adaptado a los nuevos entornos de ejecución distribuidos
     - name: Configurar Java
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
 
+    # v2.17.0+ incluye soporte completo para Node 24 y las últimas versiones estables de Flutter
     - name: Configurar Flutter
       uses: subosito/flutter-action@v2
       with:
         channel: 'stable'
 
-    - name: Descubrir Ruta y Compilar APK
+    - name: Instalar dependencias y Compilar APK
       run: |
-        export FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true
+        # 1. Encontrar de manera dinámica la carpeta donde está el proyecto
+        DIR_PROYECTO=$(dirname $(find . -name "pubspec.yaml" | head -n 1))
+        echo "Carpeta encontrada: $DIR_PROYECTO"
         
-        # 1. Localizar la carpeta real del proyecto
-        RUTA_PROYECTO=$(dirname $(find . -name "pubspec.yaml" | head -n 1))
-        echo "🚀 Proyecto detectado en la ruta: $RUTA_PROYECTO"
-        
-        # 2. Moverse a la carpeta e instalar dependencias
-        cd $RUTA_PROYECTO
+        # 2. Entrar a la carpeta del proyecto e instalar librerías
+        cd "$DIR_PROYECTO"
         flutter pub get
         flutter pub add flutter_webrtc web_socket_channel
         
-        # 3. Compilar la APK
+        # 3. Compilar el archivo ejecutable APK
         flutter build apk --release
         
-        # 4. Guardar la ruta exacta de la APK en el entorno de GitHub
-        echo "RUTA_APK=$RUTA_PROYECTO/build/app/outputs/flutter-apk/app-release.apk" >> $GITHUB_ENV
+        # 4. Copiar la APK a la raíz del entorno con un nombre fijo y limpio
+        cd "$GITHUB_WORKSPACE"
+        cp "$DIR_PROYECTO/build/app/outputs/flutter-apk/app-release.apk" ./app-release.apk
 
+    # v4.6.0+ es la acción oficial moderna diseñada específicamente para Node 24
     - name: Subir APK terminada
       uses: actions/upload-artifact@v4
       with:
         name: app-release
-        path: ${{ env.RUTA_APK }}
+        path: app-release.apk
