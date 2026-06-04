@@ -33,6 +33,7 @@ jobs:
         cd mi_app_temporal
         flutter pub add flutter_webrtc web_socket_channel
         flutter pub get
+        flutter pub add flutter_webrtc web_socket_channel permission_handler
         flutter build apk --release
         cp build/app/outputs/flutter-apk/app-release.apk ../app-release.apk
 
