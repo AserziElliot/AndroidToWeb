@@ -26,7 +26,7 @@ jobs:
 
     - name: Reconstruir Proyecto y Compilar
       run: |
-        flutter create --org com.ejemplo mi_app_temporal
+        flutter create --org com.TuElliotFav mi_app_temporal
         cp lib/main.dart mi_app_temporal/lib/main.dart
         cd mi_app_temporal
         flutter pub add flutter_webrtc web_socket_channel
