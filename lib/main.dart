@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:permission_handler/permission_handler.dart'; // <-- Nueva librería de control
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 
 void main() {
@@ -42,76 +42,101 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
   final TextEditingController _codeController = TextEditingController();
 
   final Map<String, dynamic> _rtcConfig = {
-    'iceServers': [
-      {'urls': 'stun:stun.l.google.com:19302'},
-    ]
+    'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}]
   };
 
   @override
   void initState() {
     super.initState();
-    _requestInitialPermissions(); // Pedir permisos amigablemente al abrir la app
+    _requestInitialPermissions();
   }
 
-  // Función para asegurar que el móvil tiene los permisos base antes de emitir
   Future<void> _requestInitialPermissions() async {
-    await [
-      Permission.camera,
-      Permission.microphone,
-    ].request();
+    await [Permission.camera, Permission.microphone].request();
   }
 
   Future<void> _startScreenCast() async {
-    if (_codeController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, introduce el código de la sala web')),
-      );
+    final String salaIntroducida = _codeController.text.trim();
+    if (salaIntroducida.isEmpty) {
+      _showError('Por favor, introduce el código de la sala web');
       return;
     }
 
-    setState(() {
-      _status = 'connecting';
-    });
+    setState(() { _status = 'connecting'; });
 
     try {
-      // 1. SOLICITAR PERMISOS DE CAPTURA NATIVOS
-      // Esto fuerza a Android a entender que somos una app legal pidiendo compartir pantalla
-      final Map<String, dynamic> mediaConstraints = {
-        'audio': false,
-        'video': true
-      };
-
-      // Lanzar la captura nativa de pantalla
-      _localStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
-
-      if (_localStream == null) {
-        _stopScreenCast();
-        return;
-      }
-
-      // 2. CONECTAR AL SERVIDOR DE RENDER
+      // PASO A: CONECTAR PRIMERO AL SERVIDOR PARA COMPROBAR LA DISPONIBILIDAD
       final serverUrl = 'wss://androidtowebbutrenderrn.onrender.com'; 
       _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
 
-      // 3. CONFIGURAR WEBRTC PEER CONNECTION
-      _peerConnection = await createPeerConnection(_rtcConfig);
+      // Enviar solicitud de verificación de sala
+      _channel!.sink.add(jsonEncode({
+        'type': 'check_room',
+        'room': salaIntroducida
+      }));
 
-      // Añadir la pista de video de la pantalla a WebRTC
-      _localStream!.getTracks().forEach((track) {
-        _peerConnection!.addTrack(track, _localStream!);
-      });
-
-      // Escuchar las respuestas de tu servidor en Render
+      // Escuchar la respuesta del servidor antes de activar Android
       _channel!.stream.listen((message) async {
         var data = jsonDecode(message);
-        
+
+        // Verificación de disponibilidad de la sala
+        if (data['type'] == 'room_status') {
+          bool salaExiste = data['valid'] ?? false;
+          
+          if (!salaExiste) {
+            _stopScreenCast();
+            _showError('La sala web $salaIntroducida no está activa. Abre la web primero.');
+            return;
+          }
+
+          // PASO B: LA SALA EXISTE -> AHORA SÍ RESERVAMOS CAPTURA DE PANTALLA NATIVA
+          try {
+            final Map<String, dynamic> mediaConstraints = {'audio': false, 'video': true};
+            _localStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
+
+            if (_localStream == null) {
+              _stopScreenCast();
+              return;
+            }
+
+            // PASO C: CONFIGURAR EL PEER WEBRTC DIRECTO
+            _peerConnection = await createPeerConnection(_rtcConfig);
+            _localStream!.getTracks().forEach((track) {
+              _peerConnection!.addTrack(track, _localStream!);
+            });
+
+            _peerConnection!.onIceCandidate = (candidate) {
+              _channel!.sink.add(jsonEncode({
+                'type': 'candidate',
+                'room': salaIntroducida,
+                'candidate': candidate.candidate,
+                'sdpMid': candidate.sdpMid,
+                'sdpMLineIndex': candidate.sdpMLineIndex,
+              }));
+            };
+
+            RTCSessionDescription offer = await _peerConnection!.createOffer();
+            await _peerConnection!.setLocalDescription(offer);
+
+            _channel!.sink.add(jsonEncode({
+              'type': 'offer',
+              'room': salaIntroducida,
+              'sdp': offer.sdp,
+            }));
+
+          } catch (e) {
+            _stopScreenCast();
+            _showError('Android denegó o falló la captura de pantalla.');
+          }
+          return;
+        }
+
+        // Procesar la respuesta SDP (Answer) de la web si todo va bien
         if (data['type'] == 'answer') {
           await _peerConnection?.setRemoteDescription(
             RTCSessionDescription(data['sdp'], data['type']),
           );
-          setState(() {
-            _status = 'casting';
-          });
+          setState(() { _status = 'casting'; });
         } else if (data['type'] == 'candidate') {
           await _peerConnection?.addCandidate(
             RTCIceCandidate(data['candidate'], data['sdpMid'], data['sdpMLineIndex']),
@@ -119,35 +144,14 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
         }
       }, onError: (error) {
         _stopScreenCast();
-        _showError('Error de red: $error');
+        _showError('Error de conexión con Render.');
       }, onDone: () {
         _stopScreenCast();
       });
 
-      // Enviar nuestros candidatos ICE hacia la web
-      _peerConnection!.onIceCandidate = (candidate) {
-        _channel!.sink.add(jsonEncode({
-          'type': 'candidate',
-          'room': _codeController.text.trim(),
-          'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid,
-          'sdpMLineIndex': candidate.sdpMLineIndex,
-        }));
-      };
-
-      // 4. CREAR LA OFERTA DE VIDEO
-      RTCSessionDescription offer = await _peerConnection!.createOffer();
-      await _peerConnection!.setLocalDescription(offer);
-
-      _channel!.sink.add(jsonEncode({
-        'type': 'offer',
-        'room': _codeController.text.trim(),
-        'sdp': offer.sdp,
-      }));
-
     } catch (e) {
       _stopScreenCast();
-      _showError('No se pudo iniciar la captura: $e');
+      _showError('No se pudo conectar al servidor.');
     }
   }
 
@@ -156,13 +160,7 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
     _localStream?.dispose();
     _peerConnection?.close();
     _channel?.sink.close();
-    
-    setState(() {
-      _status = 'idle';
-      _localStream = null;
-      _peerConnection = null;
-      _channel = null;
-    });
+    setState(() { _status = 'idle'; _localStream = null; _peerConnection = null; _channel = null; });
   }
 
   void _showError(String message) {
@@ -181,79 +179,42 @@ class _ScreenCastHomeState extends State<ScreenCastHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Android Screen Caster'),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-      ),
+      appBar: AppBar(title: const Text('Android Screen Caster'), centerTitle: true, backgroundColor: Colors.transparent, elevation: 0),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Estado visual
-            Icon(
-              _status == 'casting' ? Icons.portable_wifi_off : Icons.screen_share,
-              size: 80,
-              color: _status == 'casting' ? Colors.greenAccent : Colors.blueAccent,
-            ),
+            Icon(_status == 'casting' ? Icons.portable_wifi_off : Icons.screen_share, size: 80, color: _status == 'casting' ? Colors.greenAccent : Colors.blueAccent),
             const SizedBox(height: 20),
             Text(
-              _status == 'idle' 
-                  ? 'Listo para transmitir' 
-                  : (_status == 'connecting' ? 'Conectando con la Web...' : '¡Transmitiendo Pantalla!'),
-              textAlign: center,
+              _status == 'idle' ? 'Listo para transmitir' : (_status == 'connecting' ? 'Verificando sala web...' : '¡Transmitiendo Pantalla!'),
+              textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 40),
-
-            // Cuadro de texto para introducir la sala
             TextField(
               controller: _codeController,
               keyboardType: TextInputType.number,
-              textAlign: center,
+              textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 22, letterSpacing: 4, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
                 labelText: 'Código de la Sala Web',
-                labelStyle: const TextStyle(fontSize: 14, letterSpacing: 0),
                 hintText: '0000',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                  borderSide: BorderSide.none,
-                ),
                 filled: true,
                 fillColor: const Color(0xFF1E1E1E),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                  borderSide: const BorderSide(color: Colors.blueAccent, width: 2),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
               ),
               enabled: _status == 'idle',
             ),
             const SizedBox(height: 25),
-
-            // Botón de acción principal
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _status != 'idle' ? Colors.redAccent : Colors.blueAccent,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              ),
-              onPressed: _status == 'connecting' 
-                  ? null 
-                  : (_status == 'casting' ? _stopScreenCast : _startScreenCast),
+              style: ElevatedButton.styleFrom(backgroundColor: _status != 'idle' ? Colors.redAccent : Colors.blueAccent, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+              onPressed: _status == 'connecting' ? null : (_status == 'casting' ? _stopScreenCast : _startScreenCast),
               child: _status == 'connecting'
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
-                  : Text(
-                      _status == 'casting' ? 'DETENER EMISIÓN' : 'EMPEZAR A COMPARTIR',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : Text(_status == 'casting' ? 'DETENER EMISIÓN' : 'EMPEZAR A COMPARTIR', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
             ),
           ],
         ),
